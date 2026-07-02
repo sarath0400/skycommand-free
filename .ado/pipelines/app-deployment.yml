@@ -1,0 +1,93 @@
+# ============================================================================
+# Azure DevOps pipeline — the SAME tool real skyCommand uses (free tier).
+# Mirrors skyCommand's app-deployment-enhanced.yml, kept minimal:
+#   Stage 1  Build   -> docker build + push to a free registry (ghcr.io / Docker Hub)
+#   Stage 2  Dev     -> auto deploy to Render Dev
+#   Stage 3  QA      -> deploy to Render QA   (approval on the 'qa' environment)
+#   Stage 4  Prod    -> deploy to Render Prod (approval on the 'prod' environment)
+#
+# One-time setup in Azure DevOps:
+#   - Project Settings > Service connections > new "Docker Registry" connection
+#       named 'free-registry' (ghcr.io or Docker Hub).
+#   - Pipelines > Environments > create 'dev', 'qa', 'prod'.
+#       On 'qa' and 'prod' add Approvals & checks > Approvals (yourself) = the gates.
+#   - Pipelines > Library > variable group 'skycommand-free':
+#       imageRepo               = ghcr.io/<you>/skycommand-free   (or dockerhubuser/skycommand-free)
+#       renderDeployHookDev     = <Render Dev deploy hook URL>   (mark secret)
+#       renderDeployHookQA      = <Render QA deploy hook URL>    (mark secret)
+#       renderDeployHookProd    = <Render Prod deploy hook URL>  (mark secret)
+# ============================================================================
+
+trigger:
+  branches:
+    include: [ release ]
+
+variables:
+  - group: skycommand-free
+  - name: tag
+    value: '$(Build.BuildId)'
+
+stages:
+# --- Stage 1: Build & push the container --------------------------------------
+- stage: Build
+  displayName: '🐳 Build & Push image'
+  jobs:
+  - job: BuildImage
+    pool:
+      vmImage: 'ubuntu-latest'   # free Microsoft-hosted agent
+    steps:
+    - task: Docker@2
+      displayName: 'Build and push'
+      inputs:
+        containerRegistry: 'free-registry'
+        repository: '$(imageRepo)'
+        command: 'buildAndPush'
+        Dockerfile: 'Dockerfile'
+        tags: |
+          $(tag)
+          latest
+
+# --- Stage 2: Deploy to Dev (automatic) ---------------------------------------
+- stage: DeployDev
+  displayName: '🚀 Deploy to Dev'
+  dependsOn: Build
+  jobs:
+  - deployment: Dev
+    environment: 'dev'
+    pool: { vmImage: 'ubuntu-latest' }
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: curl -fsSL -X POST "$(renderDeployHookDev)"
+            displayName: 'Trigger Render Dev deploy'
+
+# --- Stage 3: Deploy to QA (approval on 'qa' environment) ---------------------
+- stage: DeployQA
+  displayName: '🚀 Deploy to QA'
+  dependsOn: DeployDev
+  jobs:
+  - deployment: QA
+    environment: 'qa'          # add an Approval check here = the QA gate
+    pool: { vmImage: 'ubuntu-latest' }
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: curl -fsSL -X POST "$(renderDeployHookQA)"
+            displayName: 'Trigger Render QA deploy'
+
+# --- Stage 4: Deploy to Production (approval on 'prod' environment) -----------
+- stage: DeployProd
+  displayName: '🚀 Deploy to Production'
+  dependsOn: DeployQA
+  jobs:
+  - deployment: Prod
+    environment: 'prod'        # add an Approval check here = the senior gate
+    pool: { vmImage: 'ubuntu-latest' }
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: curl -fsSL -X POST "$(renderDeployHookProd)"
+            displayName: 'Trigger Render Prod deploy'

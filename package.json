@@ -1,0 +1,16 @@
+{
+  "name": "skycommand-free",
+  "version": "1.0.0",
+  "description": "A free-tier mirror of the skyCommand setup: Node.js + Python dashboard, containerized, boot-migrated Postgres, Gemini AI.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "migrate": "node server/migrate.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  }
+}

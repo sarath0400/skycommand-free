@@ -1,0 +1,8 @@
+[project]
+name = "skycommand-free-forecast"
+version = "1.0.0"
+description = "Light Python forecasting deps for the free skyCommand mirror"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy",
+]

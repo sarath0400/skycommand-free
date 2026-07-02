@@ -1,0 +1,19 @@
+# Render blueprint (free tier) — the "App Service" equivalent.
+# Runs the container we built. Create three services (dev/qa/prod) the same way,
+# or start with one. Each gets a free https://<name>.onrender.com URL.
+services:
+  - type: web
+    name: skycommand-free
+    runtime: image
+    plan: free
+    image:
+      url: ghcr.io/OWNER/skycommand-free:latest   # <-- replace OWNER
+    autoDeploy: false          # we trigger deploys from GitHub Actions
+    envVars:
+      - key: MIGRATE_ON_BOOT
+        value: "true"
+      - key: DATABASE_URL
+        sync: false            # set in Render dashboard (secret)
+      - key: GEMINI_API_KEY
+        sync: false            # set in Render dashboard (secret)
+    healthCheckPath: /api/health
