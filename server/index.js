@@ -58,27 +58,54 @@ app.get("/api/forecast", (_req, res) => {
   });
 });
 
-// --- Gemini insight (the AI, same service as skyCommand, free tier) ---
-app.get("/api/insight", async (_req, res) => {
+// --- Gemini helper (the AI, same service as skyCommand, free tier) ---
+// Tries a few model names and surfaces the real API error if it fails.
+async function callGemini(prompt) {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) return res.json({ insight: "(set GEMINI_API_KEY to enable AI insights)" });
-  try {
-    const prompt =
-      "In one short sentence, give a healthcare operations manager an insight about a readmission rate of 8.4%.";
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+  if (!key) return { error: "no GEMINI_API_KEY set" };
+  const models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"];
+  let lastErr = "no models tried";
+  for (const model of models) {
+    try {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        }
+      );
+      const data = await r.json();
+      if (!r.ok) {
+        lastErr = `${model}: ${data?.error?.message || "HTTP " + r.status}`;
+        continue; // try the next model
       }
-    );
-    const data = await r.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "(no response)";
-    res.json({ insight: text.trim() });
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) return { text: text.trim(), model };
+      lastErr = `${model}: empty response`;
+    } catch (e) {
+      lastErr = `${model}: ${String(e)}`;
+    }
   }
+  return { error: lastErr };
+}
+
+// Auto insight about the data
+app.get("/api/insight", async (_req, res) => {
+  const out = await callGemini(
+    "In one short sentence, give a healthcare operations manager an insight about a readmission rate of 8.4%."
+  );
+  res.json({ insight: out.text || "(AI error: " + out.error + ")" });
+});
+
+// Ask-a-question chat endpoint
+app.get("/api/ask", async (req, res) => {
+  const q = (req.query.q || "").toString().trim();
+  if (!q) return res.json({ answer: "(type a question)" });
+  const out = await callGemini(
+    "You are a healthcare operations analytics assistant. Answer briefly and clearly. Question: " + q
+  );
+  res.json({ answer: out.text || "(AI error: " + out.error + ")" });
 });
 
 // --- The dashboard page ---
@@ -92,12 +119,21 @@ app.get("/", (_req, res) => {
  .card{background:#131c30;border:1px solid #223052;border-radius:12px;padding:18px}
  .card .n{font-size:13px;color:#8aa0c0} .card .v{font-size:28px;font-weight:700;margin-top:6px}
  .box{margin-top:24px;background:#131c30;border:1px solid #223052;border-radius:12px;padding:18px}
+ input{width:70%;padding:10px;border-radius:8px;border:1px solid #223052;background:#0b1220;color:#e6edf7}
+ button{padding:10px 18px;border-radius:8px;border:0;background:#3b6fe0;color:#fff;cursor:pointer;margin-left:8px}
+ #ans{margin-top:14px;white-space:pre-wrap}
 </style></head><body>
 <h1>skyCommand — free edition</h1>
 <div class="sub">A dashboard demo · Node.js + Python · Postgres · Gemini AI</div>
 <div id="kpis" class="grid">loading…</div>
 <div class="box"><b>Forecast:</b> <span id="fc">loading…</span></div>
 <div class="box"><b>AI insight:</b> <span id="ai">loading…</span></div>
+<div class="box">
+  <b>Ask the AI a question:</b><br><br>
+  <input id="q" placeholder="e.g. Why might readmission rate be high?" onkeydown="if(event.key==='Enter')ask()">
+  <button onclick="ask()">Ask</button>
+  <div id="ans"></div>
+</div>
 <script>
  fetch('/api/kpis').then(r=>r.json()).then(d=>{
    document.getElementById('kpis').innerHTML = (d.kpis||[]).map(k=>
@@ -110,6 +146,14 @@ app.get("/", (_req, res) => {
  fetch('/api/insight').then(r=>r.json()).then(d=>{
    document.getElementById('ai').textContent = d.insight || d.error;
  });
+ function ask(){
+   var q = document.getElementById('q').value;
+   if(!q) return;
+   document.getElementById('ans').textContent = 'Thinking…';
+   fetch('/api/ask?q=' + encodeURIComponent(q)).then(r=>r.json()).then(d=>{
+     document.getElementById('ans').textContent = d.answer || d.error;
+   }).catch(e=>document.getElementById('ans').textContent = 'Error: ' + e);
+ }
 </script>
 </body></html>`);
 });
